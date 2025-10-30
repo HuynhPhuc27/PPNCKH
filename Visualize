@@ -1,0 +1,104 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.models import load_model
+from tensorflow.keras.utils import to_categorical
+from PIL import Image
+import matplotlib.pyplot as plt
+import cv2
+
+# ---------------------------
+MODEL_PATH = "/content/drive/MyDrive/2025-2026/HK1/PPNCKH/unet_vgg16_multiclass_best_5_class.h5"
+IMG_PATH = "/content/20251007_134002.jpg"
+IMG_SIZE = (448, 448)
+
+class_map = {
+    0: "Background",
+    1: "Xe đạp",
+    2: "Xe bốn bánh",
+    3: "Xe máy",
+    4: "Phương tiện khác"
+}
+
+def dice_coef(y_true, y_pred, smooth=1e-6):
+    y_true_f = tf.reshape(y_true, [-1, y_true.shape[-1]])
+    y_pred_f = tf.reshape(y_pred, [-1, y_pred.shape[-1]])
+    intersection = tf.reduce_sum(y_true_f * y_pred_f, axis=0)
+    dice = (2. * intersection + smooth) / (
+        tf.reduce_sum(y_true_f, axis=0) + tf.reduce_sum(y_pred_f, axis=0) + smooth
+    )
+    return tf.reduce_mean(dice)
+
+def iou_coef(y_true, y_pred, smooth=1e-6):
+    y_true_f = tf.reshape(y_true, [-1, y_true.shape[-1]])
+    y_pred_f = tf.reshape(y_pred, [-1, y_pred.shape[-1]])
+    intersection = tf.reduce_sum(y_true_f * y_pred_f, axis=0)
+    union = tf.reduce_sum(y_true_f + y_pred_f, axis=0) - intersection
+    iou = (intersection + smooth) / (union + smooth)
+    return tf.reduce_mean(iou)
+
+def load_and_preprocess_image(img_path):
+    img = load_img(img_path, target_size=IMG_SIZE)
+    img_arr = img_to_array(img) / 255.0
+    img_arr = np.expand_dims(img_arr, axis=0)
+    return img_arr
+
+def predict_mask(model, img_arr):
+    pred = model.predict(img_arr)
+    pred = np.argmax(pred, axis=-1).astype(np.uint8)
+    return pred
+
+def visualize_result(image_path, pred_mask):
+    img = Image.open(image_path).resize(IMG_SIZE)
+    pred_color = np.zeros((*IMG_SIZE, 3), dtype=np.uint8)
+    pred_mask = np.squeeze(pred_mask)
+    colors = [
+        (255, 0, 0),
+        (0, 255, 0),    # Xe đạp
+        (0, 0, 255),    # Xe bốn bánh
+        (255, 255, 0),# Xe máy
+        (255, 0, 255)# Phương tiện khác
+    ]
+    color_mask = np.zeros((pred_mask.shape[0], pred_mask.shape[1], 3), dtype=np.uint8)
+    for cls_id, color in enumerate(colors):
+        color_mask[pred_mask == cls_id] = color
+
+    blended = cv2.addWeighted(np.array(img), 0.6, color_mask, 0.4, 0)
+
+    plt.figure(figsize=(15,5))
+    plt.subplot(1,3,1)
+    plt.title("Ảnh gốc")
+    plt.imshow(img)
+    plt.axis("off")
+
+    plt.subplot(1,3,2)
+    plt.title("Mask dự đoán")
+    plt.imshow(pred_mask, cmap="jet")
+    plt.axis("off")
+
+    plt.subplot(1,3,3)
+    plt.title("Chồng ảnh & mask")
+    plt.imshow(blended)
+    plt.axis("off")
+    plt.show()
+
+# ---------------------------
+def main():
+    print("Đang load mô hình...")
+    model = load_model(
+        MODEL_PATH,
+        custom_objects={"dice_coef": dice_coef, "iou_coef": iou_coef},
+        compile=False
+    )
+
+    print("Đang xử lý ảnh...")
+    img_arr = load_and_preprocess_image(IMG_PATH)
+
+    print("Đang dự đoán...")
+    pred_mask = predict_mask(model, img_arr)
+
+    visualize_result(IMG_PATH, pred_mask)
+
+if __name__ == "__main__":
+    main()
